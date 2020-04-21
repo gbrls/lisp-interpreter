@@ -347,24 +347,26 @@ void register_function(Lisp_Object sym, Lisp_Object (*function)(Lisp_Object)) {
 }
 
 Lisp_Object test_fn(Lisp_Object args) {
-	return fintern("Symbow");
+	return fcons(fcar(args), fcons(OBJ(12, number),NIL));
 }
 
-Lisp_Object funcall(Lisp_Object car, Lisp_Object cdr) {
+// something like funcall but it uses the funcion pointer,
+// where funcall uses the symbol's value
+Lisp_Object call_builtin(Lisp_Object car, Lisp_Object cdr) {
 
 	Lisp_Object ans=NIL;
 
 	if(((Lisp_Symbol*) ptr_untag(car))->function != NULL) {
 
-		DEBUG("FUNCALL: %s\n", GET_VAL(car, symbol));
+		DEBUG("call_builtin: %s\n", GET_VAL(car, symbol));
 
 		Lisp_Object (*fn_ptr)(Lisp_Object) = ((Lisp_Symbol*) ptr_untag(car))->function;
 		fn_ptr(cdr);
 
-		ans=fcar(cdr);
+		ans=fn_ptr(cdr);
 	}
 
-	printf("funcall: ");
+	printf("call_builtin: ");
 	_Lisp_Print(cdr, 1);
 	printf(" => ");
 	Lisp_Print(ans);
@@ -400,7 +402,7 @@ int main(int argc, char** argv) {
 	Lisp_Object fn = fintern("test-fn");
 
 	register_function(fn, test_fn);
-	funcall(fn, fcons(b,NIL));
+	call_builtin(fn, fcons(b,NIL));
 
 	//Lisp_Print(fcons(a,fcons(b, NIL)));
 

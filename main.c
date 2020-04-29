@@ -537,8 +537,6 @@ Lisp_Object eval(Lisp_Object expr, Lisp_Object env) {
 		} else {
 			Lisp_Object fn = fassoc(fcar(expr), env);
 
-			printf("FN: ");
-			Lisp_Print(fn);
 			assert(fn != NIL);
 			assert(fatom(fn)==NIL);
 			assert(feq(fintern("lambda"), fcar(fn))!=NIL);
@@ -579,7 +577,7 @@ int main(int argc, char** argv) {
 
 	while(feq(fintern("quit"), res)==NIL) {
 
-		printf("REPL> ");
+		printf("\033[1m\033[37mREPL>\033[0m ");
 
 		char buf[MAX_INPUT_STR];
 		scanf("%[^\n]", buf);
@@ -587,8 +585,6 @@ int main(int argc, char** argv) {
 
 		int sz;
 		Token* tokens = tokenize(buf, &sz);
-
-		//DEBUG("Read %d tokens\n", sz);
 
 		input = parse(tokens, 0, sz);
 		input = fcar(input);
@@ -605,30 +601,6 @@ int main(int argc, char** argv) {
 
 		Lisp_Print(res);
 	}
-
-
-	//Lisp_Object b = OBJ(10, number);
-	//Lisp_Object c = OBJ("test-fn", symbol);
-
-	//Lisp_Object fn = fintern("test-fn");
-	//Lisp_Object hellofn = fintern("hellofn");
-
-	//prot_register_function(fn, test_fn, 2);
-	//prot_register_function(hellofn, test_hello, 0);
-
-	//Lisp_Object args = fcons(b, fcons(c, NIL));
-	//Lisp_Object ans = prot_call_builtin(fn, args);
-
-
-	//ans = prot_call_builtin(hellofn, NIL);
-
-
-
-
-	//register_function(fn, test_fn);
-	//call_builtin(fn, fcons(b,NIL));
-
-	//Lisp_Print(fcons(a,fcons(b, NIL)));
 
 	return 0;
 }

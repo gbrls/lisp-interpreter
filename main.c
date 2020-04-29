@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <assert.h>
 
-#define DEBUG_F 1
+//#define DEBUG_F 1
 
 #ifdef DEBUG_F
 
@@ -134,10 +134,18 @@ typedef uintptr_t Lisp_Object;
 
 Lisp_Object ENV = NIL;
 
+
+/*
+** How functions work in myLisp: There are two kinds of functions, builtin and
+** user-defined. Every symbol has a slot pointing to a struct which holds a
+** pointer to the C function and the number of arguments it has.
+ */
+
 typedef struct {
-	int nargs;
+	int nargs; // nargs are set to -1 if this is not a valid function
 	//TODO: &optional, &key, &rest, etc...
 	union {
+		Lisp_Object (*f0)(void);
 		Lisp_Object (*f1)(Lisp_Object);
 		Lisp_Object (*f2)(Lisp_Object, Lisp_Object);
 		Lisp_Object (*f3)(Lisp_Object, Lisp_Object, Lisp_Object);
@@ -151,6 +159,7 @@ typedef struct {
 	//TODO: use this, lol
 	Lisp_Function fn;
 	Lisp_Object obj; // The object which is stored in the symbol
+	//Lisp_Object fn_obj; // User defined function, this slot holds the function stored by the symbol. AND WE WONT USE IT FOR NOW
 }Lisp_Symbol;
 
 
@@ -180,11 +189,14 @@ Lisp_Object Obj_New_symbol(char* str) {
 
 	Lisp_Symbol* symb = (Lisp_Symbol*) malloc(sizeof(Lisp_Symbol));
 	symb->obj = NIL;
-	symb->function = NULL;
+	symb->fn = (Lisp_Function){.nargs=-1};
 
 	char* nstr = (char*) malloc(strlen(str)+1);
 	strcpy(nstr, str);
 	nstr[strlen(str)]='\0';
+	int sz = strlen(str);
+
+	for(int i=0;i<sz;i++) nstr[i] = toupper(nstr[i]);
 
 	symb->name = nstr;
 	Lisp_Object ret = ptr_tag((Lisp_Object)symb, TAG_SYMBOL);
@@ -237,6 +249,10 @@ Lisp_Object fcdr(Lisp_Object a) {
 	assert(ptr_getTag(a) == TAG_CONS);
 
 	return (GET_VAL(a, cons))->cdr;
+}
+
+Lisp_Object fcadr(Lisp_Object a) {
+	return fcar(fcdr(a));
 }
 
 
@@ -340,14 +356,41 @@ Lisp_Object fintern(char* name) {
 	return Obj_New_symbol(name);
 }
 
+// Add symbol with builtin function to the enviroment.
 void register_function(Lisp_Object sym, Lisp_Object (*function)(Lisp_Object)) {
 	((Lisp_Symbol*) ptr_untag(sym))->function = function;
 
 	ENV = fcons(sym, ENV);
 }
 
-Lisp_Object test_fn(Lisp_Object args) {
-	return fcons(fcar(args), fcons(OBJ(12, number),NIL));
+
+void prot_register_function(Lisp_Object sym, Lisp_Object (*function)(), int nargs) {
+
+	Lisp_Function fn = (Lisp_Function){.nargs=nargs};
+	if(nargs==0) {
+		fn.ptr.f0 = function;
+	} else if(nargs==1) {
+		fn.ptr.f1 = function;
+	} else if(nargs==2) {
+		fn.ptr.f2 = function;
+	} else if(nargs==3) {
+		fn.ptr.f3 = function;
+	} else if(nargs==4) {
+		fn.ptr.f4 = function;
+	}
+
+	((Lisp_Symbol*) ptr_untag(sym))->fn = fn;
+
+	ENV = fcons(fcons(sym, NIL), ENV);
+}
+
+Lisp_Object test_fn(Lisp_Object a, Lisp_Object b) {
+	puts("test_fn called");
+	return fcons(a, b);
+}
+
+Lisp_Object test_hello() {
+	return fintern("hello-there");
 }
 
 // something like funcall but it uses the funcion pointer,
@@ -374,35 +417,216 @@ Lisp_Object call_builtin(Lisp_Object car, Lisp_Object cdr) {
 	return ans;
 }
 
-int main(int argc, char** argv) {
+Lisp_Object fnth(Lisp_Object list, int n) {
+	Lisp_Object cur = list;
+	int iter = 0;
+	while(iter < n) {
+		iter++;
+		cur = fcdr(cur);
+	}
+	return fcar(cur);
+}
 
-	char buf[MAX_INPUT_STR];
-	scanf("%[^\n]", buf);
+Lisp_Object prot_call_builtin(Lisp_Object fn, Lisp_Object args) {
 
-	int sz;
-	Token* tokens = tokenize(buf, &sz);
+	Lisp_Object ans=NIL;
 
-	//DEBUG("Read %d tokens\n", sz);
+	int nargs = ((Lisp_Symbol*) ptr_untag(fn))->fn.nargs;
 
-	Lisp_Object a = parse(tokens, 0, sz);
-	Lisp_Print(fcar(a));
+	if(nargs == 0) {
+		ans = ((Lisp_Symbol*) ptr_untag(fn))->fn.ptr.f0();
+	} else if(nargs == 1) {
+		ans = ((Lisp_Symbol*) ptr_untag(fn))->fn.ptr.f1(fcar(args));
+	} else if(nargs == 2) {
+		ans = ((Lisp_Symbol*) ptr_untag(fn))->fn.ptr.f2(fcar(args), fcar(fcdr(args)));
+	} else {
+		printf("NARGS NOT SUPPORTED! (%d)\n", nargs);
+		return NIL;
+	}
 
-	for(int i=0;i<sz;i++) {
-		if(tokens[i].type==TOKEN_SYMBOL) {
-			free(tokens[i].data.name);
+	return ans;
+}
+
+Lisp_Object fatom(Lisp_Object expr) {
+	if(ptr_getTag(expr)!= TAG_CONS) {
+		return fintern("t");
+	}
+
+	return NIL;
+}
+
+void fpush_env(Lisp_Object a) {
+
+	ENV = fcons(a,ENV);
+}
+
+//TODO: implement eq for any object
+Lisp_Object feq(Lisp_Object a, Lisp_Object b) {
+
+	if(a==NIL || b == NIL) return NIL;
+
+	if(ptr_getTag(a)==ptr_getTag(b)) {
+		if(ptr_getTag(a)==TAG_SYMBOL) {
+			if(strcmp(((Lisp_Symbol*)a)->name,((Lisp_Symbol*)b)->name) == 0) {
+				return fintern("t");
+			}
 		}
 	}
 
-	free(tokens);
+	return NIL;
+}
+
+Lisp_Object fassoc(Lisp_Object a, Lisp_Object e) {
+	Lisp_Object cur = e;
+
+	while(cur!=NIL && feq(a,fcar(fcar(cur))) == NIL) {
+		cur = fcdr(cur);
+	}
+
+	if(cur != NIL) return fcdr(fcar(cur));
+
+	return cur;
+}
+
+Lisp_Object flength(Lisp_Object a) {
+	int sz=0;
+	Lisp_Object cur = a;
+	while(a!=NIL) {
+		a = fcdr(a);
+		sz++;
+	}
+
+	return OBJ(sz, number);
+}
+
+Lisp_Object eval(Lisp_Object expr, Lisp_Object env) {
+
+	Lisp_Object ans = NIL;
+
+	if(fatom(expr)!=NIL) {
+		if(ptr_getTag(expr) == TAG_SYMBOL) ans = fassoc(expr, env);
+		if(ptr_getTag(expr) == TAG_NUMBER) ans = expr;
+	} else if(fatom(fcar(expr))!=NIL) {
+		if(feq(fintern("quote"), fcar(expr))!=NIL) {
+			ans = fcadr(expr);
+		} else if(feq(fintern("setf"), fcar(expr))!=NIL) {
+			Lisp_Object b = eval(fnth(expr, 2), env);
+			fpush_env(fcons(fnth(expr, 1), b));
+		} else if(feq(fintern("atom"), fcar(expr))!=NIL) {
+			Lisp_Object a = eval(fcadr(expr), env);
+			ans = fatom(a);
+		} else if(feq(fintern("car"), fcar(expr))!=NIL) {
+			Lisp_Object a = eval(fcadr(expr), env);
+			ans = fcar(a);
+		} else if(feq(fintern("cdr"), fcar(expr))!=NIL) {
+			Lisp_Object a = eval(fcadr(expr), env);
+			ans = fcdr(a);
+		} else if(feq(fintern("eq"), fcar(expr))!=NIL) {
+			Lisp_Object a = eval(fcadr(expr), env);
+			Lisp_Object b = eval(fcadr(fcdr(expr)), env);
+			ans = feq(a, b);
+		} else if(feq(fintern("exit"), fcar(expr))!=NIL) {
+			exit(0);
+		} else if(feq(fintern("cons"), fcar(expr))!=NIL) {
+			Lisp_Object a = eval(fcadr(expr), env);
+			Lisp_Object b = eval(fcadr(fcdr(expr)), env);
+			ans = fcons(a, b);
+		} else if(feq(fintern("length"), fcar(expr))!=NIL) {
+			Lisp_Object a = eval(fcadr(expr), env);
+			ans = flength(a);
+		} else {
+			Lisp_Object fn = fassoc(fcar(expr), env);
+
+			printf("FN: ");
+			Lisp_Print(fn);
+			assert(fn != NIL);
+			assert(fatom(fn)==NIL);
+			assert(feq(fintern("lambda"), fcar(fn))!=NIL);
+
+			ans = eval(fcons(fn, fcdr(expr)), env);
+		}
+	} else if(feq(fintern("lambda"), fcar(fcar(expr)))!=NIL) {
+		Lisp_Object local_env = env;
+		Lisp_Object arglist = fcadr(fcar(expr));
+		Lisp_Object args = fcdr(expr);
+		Lisp_Object body = fcadr(fcdr(fcar(expr)));
+
+		assert(flength(arglist)==flength(args));
+
+		while(args != NIL) {
+			Lisp_Object p = fcons(fcar(arglist), eval(fcar(args), env));
+			args = fcdr(args);
+			arglist = fcdr(arglist);
+
+			local_env = fcons(p, local_env);
+		}
+
+		ans = eval(body, local_env);
+	}
 
 
-	Lisp_Object b = OBJ(10, number);
-	Lisp_Object c = OBJ("hello-there", symbol);
+	return ans;
+}
 
-	Lisp_Object fn = fintern("test-fn");
+int main(int argc, char** argv) {
 
-	register_function(fn, test_fn);
-	call_builtin(fn, fcons(b,NIL));
+	Lisp_Object input = NIL, res = NIL;
+
+
+	fpush_env(fcons(fintern("a"), OBJ(12, number)));
+
+	puts("Created by Gabriel Schneider - 2020\nWelcome to myLisp 0.0.0\n");
+
+	while(feq(fintern("quit"), res)==NIL) {
+
+		printf("REPL> ");
+
+		char buf[MAX_INPUT_STR];
+		scanf("%[^\n]", buf);
+		getchar();
+
+		int sz;
+		Token* tokens = tokenize(buf, &sz);
+
+		//DEBUG("Read %d tokens\n", sz);
+
+		input = parse(tokens, 0, sz);
+		input = fcar(input);
+
+		for(int i=0;i<sz;i++) {
+			if(tokens[i].type==TOKEN_SYMBOL) {
+				free(tokens[i].data.name);
+			}
+		}
+
+		free(tokens);
+
+		res = eval(input, ENV);
+
+		Lisp_Print(res);
+	}
+
+
+	//Lisp_Object b = OBJ(10, number);
+	//Lisp_Object c = OBJ("test-fn", symbol);
+
+	//Lisp_Object fn = fintern("test-fn");
+	//Lisp_Object hellofn = fintern("hellofn");
+
+	//prot_register_function(fn, test_fn, 2);
+	//prot_register_function(hellofn, test_hello, 0);
+
+	//Lisp_Object args = fcons(b, fcons(c, NIL));
+	//Lisp_Object ans = prot_call_builtin(fn, args);
+
+
+	//ans = prot_call_builtin(hellofn, NIL);
+
+
+
+
+	//register_function(fn, test_fn);
+	//call_builtin(fn, fcons(b,NIL));
 
 	//Lisp_Print(fcons(a,fcons(b, NIL)));
 

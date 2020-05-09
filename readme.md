@@ -1,6 +1,6 @@
 # What is myLisp?
 myLisp is a lisp-like language that I created in order to learn how to write an
-interpreter for a lisp-like languge.
+interpreter for a lisp-like language.
 
 ## Features
 

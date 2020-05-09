@@ -33,3 +33,8 @@ Calling functions:
 (length+1 (quote (a b)))
 > 3
 ```
+
+# Missing features
++ Garbage Collection.
++ Lexical scope.
++ Be usable.
